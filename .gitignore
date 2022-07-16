@@ -30,3 +30,20 @@
 *.exe
 *.out
 *.app
+
+# CMake build directories
+cmake-build-debug/
+cmake-build-minsizerel/
+cmake-build-release/
+cmake-build-relwithdebinfo/
+
+# Environment
+layouts/  # for testing the converter
+test_json/  # ^^^
+.idea/
+.vscode/
+venv/
+.git/
+
+# The original converter
+PolyConverter
