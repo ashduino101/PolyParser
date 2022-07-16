@@ -5,5 +5,5 @@ A converter for Poly Bridge 2's .layout files, written in C++. Similar to PolyCo
 
 1. Open Command Prompt or your favorite terminal.
 2. Navigate to the directory you have PolyParser downloaded to.
-3. Run `./PolyParser <path to layout>` (or `./PolyParser.exe` for Windows)
+3. Run `./PolyParser "<path to layout>"` (or `./PolyParser.exe "<path to layout>"` for Windows)
 4. The converted layout should be in the same directory as the original.
