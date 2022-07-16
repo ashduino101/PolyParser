@@ -5,7 +5,6 @@
  * This file is part of PolyParser.
  **********************************************************************************************************************/
 
-#define DEV 1
 #define MAX_VERSION 25  // Maximum layout version fully supported
 #define MAX_BRIDGE_VERSION 9  // Maximum bridge version fully supported
 
