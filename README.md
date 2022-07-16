@@ -13,3 +13,7 @@ A converter for Poly Bridge 2's .layout files, written in C++. Similar to PolyCo
 Building from source requires CMake, a C++ compiler, and GNU Make.
 All you have to do is execute `build.sh` on Linux, or `build.bat` on Windows.
 To build for both platforms, run `python build.py`.
+
+# License
+
+This project and every dependency is licensed under the MIT License.
