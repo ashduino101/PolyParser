@@ -3,19 +3,32 @@
  * Licensed under the MIT License. See LICENSE in the project root for license information.
  *
  * This file is part of PolyParser.
+ *
+ * If you would like to contribute to the project, it is advised you collapse all in the file, as this file is thousands
+ * of lines long.
  **********************************************************************************************************************/
 
-#define MAX_VERSION 25  // Maximum layout version fully supported
-#define MAX_BRIDGE_VERSION 9  // Maximum bridge version fully supported
 
+// Macros
+#define MAX_VERSION 26  // Maximum layout version fully supported
+#define MAX_BRIDGE_VERSION 11  // Maximum bridge version fully supported
+#define MAX_SLOT_VERSION 3  // Maximum slot version fully supported
+#define MAX_PHYSICS_VERSION 1  // Maximum physics engine version fully supported
+
+// Standard library
 #include <iostream>
 #include <fstream>
+#include <utility>
 #include <vector>
 #include <chrono>
 #include <filesystem>
+#include <string>
+#include <codecvt>
 
+// People might have this
 #include <getopt.h>
 
+// 3rd-party libraries
 #include "inc/json.hpp"
 #include "inc/fifo_map.hpp"  // For ordered JSON
 
@@ -31,7 +44,6 @@ using json = nlohmann::basic_json<workaround_fifo_map>;
 bool silent = false;
 int unusualNumbers = 1;
 
-// These enums may be unused at the moment, but don't remove them, they'll be used for YAML support in the near future.
 enum BridgeMaterialType {
     INVALID,
     ROAD,
@@ -71,6 +83,80 @@ enum SplineType {
     Bezier,
     Linear
 };
+// Save slot enums
+enum BinaryEntryType {
+    Invalid = 0x0,
+    NamedStartOfReferenceNode = 0x1,
+    UnnamedStartOfReferenceNode = 0x2,
+    NamedStartOfStructNode = 0x3,
+    UnnamedStartOfStructNode = 0x4,
+    EndOfNode = 0x5,
+    StartOfArray = 0x6,
+    EndOfArray = 0x7,
+    PrimitiveArray = 0x8,
+    NamedInternalReference = 0x9,
+    UnnamedInternalReference = 0xA,
+    NamedExternalReferenceByIndex = 0xB,
+    UnnamedExternalReferenceByIndex = 0xC,
+    NamedExternalReferenceByGuid = 0xD,
+    UnnamedExternalReferenceByGuid = 0xE,
+    NamedSByte = 0xF,
+    UnnamedSByte = 0x10,
+    NamedByte = 0x11,
+    UnnamedByte = 0x12,
+    NamedShort = 0x13,
+    UnnamedShort = 0x14,
+    NamedUShort = 0x15,
+    UnnamedUShort = 0x16,
+    NamedInt = 0x17,
+    UnnamedInt = 0x18,
+    NamedUInt = 0x19,
+    UnnamedUInt = 0x1A,
+    NamedLong = 0x1B,
+    UnnamedLong = 0x1C,
+    NamedULong = 0x1D,
+    UnnamedULong = 0x1E,
+    NamedFloat = 0x1F,
+    UnnamedFloat = 0x20,
+    NamedDouble = 0x21,
+    UnnamedDouble = 0x22,
+    NamedDecimal = 0x23,
+    UnnamedDecimal = 0x24,
+    NamedChar = 0x25,
+    UnnamedChar = 0x26,
+    NamedString = 0x27,
+    UnnamedString = 0x28,
+    NamedGuid = 0x29,
+    UnnamedGuid = 0x2A,
+    NamedBoolean = 0x2B,
+    UnnamedBoolean = 0x2C,
+    NamedNull = 0x2D,
+    UnnamedNull = 0x2E,
+    TypeName = 0x2F,
+    TypeID = 0x30,
+    EndOfStream = 0x31,
+    NamedExternalReferenceByString = 0x32,
+    UnnamedExternalReferenceByString = 0x33
+};
+enum EntryType {
+    InvalidType = 0x0,
+    String = 0x1,
+    Guid = 0x2,
+    Integer = 0x3,
+    FloatingPoint = 0x4,
+    Boolean = 0x5,
+    Null = 0x6,
+    StartOfNode = 0x7,
+    EndOfNodeType = 0x8,
+    InternalReference = 0x9,
+    ExternalReferenceByIndex = 0xA,
+    ExternalReferenceByGuid = 0xB,
+    StartOfArrayType = 0xC,
+    EndOfArrayType = 0xD,
+    PrimitiveArrayType = 0xE,
+    EndOfStreamType = 0xF,
+    ExternalReferenceByString = 0x10
+};
 
 struct Vec3 {
     float x, y, z;
@@ -96,6 +182,7 @@ struct BridgeEdge {
     std::string node_b_guid;
     SplitJointPart joint_a_part{};
     SplitJointPart joint_b_part{};
+    std::string guid;
 };
 struct BridgeSpring {
     float normalized_value{};
@@ -123,6 +210,8 @@ struct ZAxisVehicle {
     std::string guid;
     float time_delay{};
     float speed{};
+    Quaternion rot{};
+    float rotation_degrees{};
 };
 struct Vehicle {
     std::string display_name;
@@ -132,7 +221,7 @@ struct Vehicle {
     float target_speed{};
     float mass{};
     float braking_force_multiplier{};
-    StrengthMethod strength_method;
+    StrengthMethod strength_method{};
     float acceleration{};
     float max_slope{};
     float desired_acceleration{};
@@ -190,6 +279,7 @@ struct HydraulicsControllerPhase {
     std::string hydraulics_phase_guid;
     std::vector<std::string> piston_guids;
     std::vector<BridgeSplitJoint> bridge_split_joints;
+    bool disable_new_additions{};
 };
 struct TerrainIsland {
     Vec3 pos{};
@@ -346,6 +436,28 @@ struct Layout {
     bool isModded{};
     ModData modData;
 };
+// Save slot support
+struct SaveSlot {
+    int version{};
+    int physicsVersion{};
+    int slotId{};
+    std::string displayName;
+    std::string fileName;
+    int budget{};
+    long lastWriteTimeTicks{};
+    Bridge bridge;
+    bool unlimitedMaterials{};
+    bool unlimitedBudget{};
+    char* thumbnail{};
+};
+struct EntryTypeReturn {
+    EntryType type;
+    std::string name;
+};
+struct TypeEntryReturn {
+    std::string typeName;
+    std::string assemblyName;
+};
 
 namespace Utils {
     std::string prettyPrintStubKeyToTheme(const std::string &stubKey) {
@@ -483,6 +595,21 @@ namespace Utils {
         std::string dir = fp.substr(0, fp.find_last_of('/'));
         return std::filesystem::exists(dir);
     }
+
+    std::string ticks_to_datetime(long long ticks) {
+        if (ticks == 0) return "(never)";
+        // convert ticks to seconds
+        long unixEpochSeconds = 62135596800; // 1/1/1970
+        long ticksPerSecond = 10000000; // 10 million ticks per second
+        long seconds = ticks / ticksPerSecond;
+        long dateTimeSeconds = seconds - unixEpochSeconds;
+        // convert seconds to datetime
+        std::time_t time = dateTimeSeconds;
+        std::tm* tm = std::gmtime(&time);
+        std::stringstream ss;
+        ss << std::put_time(tm, "%Y-%m-%d %H:%M:%S");
+        return ss.str();
+    }
 }
 namespace U = Utils;  // lazy
 
@@ -503,6 +630,184 @@ public:
     ~Deserializer() {
         this->file.close();
     }
+    Layout deserializeLayout() {
+        Layout layout;
+        // NOTE: This has to be ordered, as it reads the file in the order it is written
+
+        // first, we get the version, which is used to determine which fields are present
+        this->getVersion(layout.version, layout.isModded);
+
+        if (layout.isModded) {
+            Utils::log_info_d("Using modded layout support");
+        }
+
+        Utils::ensureReasonable(layout.version, 0, 100, 0, 50);
+        Utils::log_info_d("Deserializing layout version %s", U::intc(layout.version).c_str());
+        if (layout.version > MAX_VERSION) {
+            Utils::log_warn_d("Layout saved with a newer version of the layout format. This may cause problems.");
+        }
+        // then we get the stub key, which is the theme of the layout, e.g. "Western"
+        layout.stubKey = this->getStubKey();
+        Utils::log_info_d("Layout stub key: %s", layout.stubKey.c_str());
+        // then we get the name of the layout, e.g. "Western"
+        // this is just used for aesthetics
+        Utils::log_info_d("Layout theme name: %s", Utils::prettyPrintStubKeyToTheme(layout.stubKey).c_str());
+
+        if (layout.version >= 19) {
+            // if the version is 19 or higher, we need to deserialize the anchors
+            layout.anchors = this->deserializeAnchors();
+        }
+
+        if (layout.version >= 5) {
+            // if the version is 5 or higher, we need to deserialize the hydraulic phases
+            layout.phases = this->deserializePhases();
+        }
+
+        // if the version is greater than 4, we can call the deserializeBridge function.
+        if (layout.version > 4) {
+            layout.bridge = this->deserializeBridge();
+        } else {
+            Utils::log_warn_d("Deserializing bridge with version under 5, consider upgrading");
+            // otherwise, we have a lot less bridge data to deal with.
+            // first, we deserialize the joints.
+            int count = this->readInt32();
+            Utils::log_info_d("Bridge joint count: %s", U::intc(count).c_str());
+            for (int i = 0; i < count; i++) {
+                layout.bridge.joints.push_back(this->deserializeJoint());
+            }
+
+            // next, the edges.
+            count = this->readInt32();
+            Utils::log_info_d("Bridge edge count: %s", U::intc(count).c_str());
+            for (int i = 0; i < count; i++) {
+                layout.bridge.edges.push_back(this->deserializeEdge(layout.bridge.version));
+            }
+
+            // last, the pistons.
+            count = this->readInt32();
+            Utils::log_info_d("Bridge piston count: %s", U::intc(count).c_str());
+            for (int i = 0; i < count; i++) {
+                layout.bridge.pistons.push_back(this->deserializePiston(layout.bridge.version));
+            }
+        }
+
+        // After that, if the version is 7 or greater, we can deserialize the Z-axis vehicles (boats, etc.).
+        if (layout.version >= 7) {
+            layout.zAxisVehicles = this->deserializeZAxisVehicles(layout.version);
+        }
+
+        // Then, we can deserialize the vehicles.
+        layout.vehicles = this->deserializeVehicles();
+
+        // Next, we deserialize the vehicle stop triggers.
+        layout.vehicleStopTriggers = this->deserializeVehicleStopTriggers();
+
+        // If the version is below 20, we deserialize the theme objects, though it's obsolete.
+        // This isn't actually collected or used when the layout is loaded in the game, but it's still useful for debugging.
+        if (layout.version < 20) {
+            layout.themeObjects_OBSOLETE = this->deserializeThemeObjects_OBSOLETE();
+        }
+
+        // After that, we can deserialize the event timelines.
+        layout.eventTimelines = this->deserializeEventTimelines(layout.version);
+
+        // Then, we deserialize checkpoints.
+        layout.checkpoints = this->deserializeCheckpoints();
+
+        // Next, we deserialize terrain stretches.
+        layout.terrainStretches = this->deserializeTerrainIslands(layout.version);
+
+        // Deserialize the platforms.
+        layout.platforms = this->deserializePlatforms(layout.version);
+
+        // Then, the ramps.
+        layout.ramps = this->deserializeRamps(layout.version);
+
+        // Hydraulic phases are here if the layout version is less than 5.
+        if (layout.version < 5) {
+            layout.phases = this->deserializePhases();
+        }
+
+        // Next, we deserialize the vehicle restart phases.
+        layout.vehicleRestartPhases = this->deserializeVehicleRestartPhases();
+
+        // Next, flying objects such as airplanes, blimps, etc.
+        layout.flyingObjects = this->deserializeFlyingObjects();
+
+        // Then, we deserialize rocks.
+        layout.rocks = this->deserializeRocks();
+
+        // After that, we deserialize water blocks.
+        layout.waterBlocks = this->deserializeWaterBlocks(layout.version);
+
+        // If the version is less than 5, there's some garbage data here.
+        if (layout.version < 5) {
+            Utils::log_warn_d("Deserializing garbage data with version under 5");
+            int count = this->readInt32();
+            int count2;
+            for (int i = 0; i < count; i++) {
+                this->readString();
+                count2 = this->readInt32();
+                for (int j = 0; j < count2; j++) {
+                    this->readString();
+                }
+            }
+        }
+
+        // Now, we can deserialize the budget.
+        layout.budget = this->deserializeBudget();
+
+        // Then, the settings.
+        layout.settings = this->deserializeSettings();
+
+        // Now, if the version is 9 or above, we have custom shapes to deal with.
+        if (layout.version >= 9) {
+            layout.customShapes = this->deserializeCustomShapes(layout.version);
+        }
+
+        // Deserialize workshop binary (version 15+)
+        if (layout.version >= 15) {
+            layout.workshop = this->deserializeWorkshop(layout.version);
+        }
+
+        // Deserialize support pillars (version 17+)
+        if (layout.version >= 17) {
+            layout.supportPillars = this->deserializeSupportPillars();
+        }
+
+        // Finally, we can deserialize pillars. (version 18+)
+        if (layout.version >= 18) {
+            layout.pillars = this->deserializePillars();
+        }
+
+        // Now, some checks:
+        // First, we check to make sure we are at the end of the file.
+        long pos = (long)this->file.tellg();
+        // Modded layouts have extra mod data at the end.
+        if (!layout.isModded) return layout;  // We can end here if there's no mod data.
+
+        // MOD SUPPORT: PTF stores mod data at the end, indicated by a negative version at the start.
+        // Notify user that we're deserializing mod data.
+        Utils::log_info_d("Deserializing mod data...");
+        // Then, we deserialize the mod data.
+        layout.modData = this->deserializePTFModData();
+        // Then, we can return the layout.
+        return layout;
+    }
+    static float fixPistonNormalizedValue(float value) {
+        float out;
+        if (value < 0.25f) {
+            out = lerp(1.0f, 0.5f, clamp01(value / 0.25f));
+            return out;
+        }
+        if (value > 0.75f) {
+            out = lerp(0.5f, 1.0f, clamp01((value - 0.75f) / 0.25f));
+            return out;
+        }
+        out = lerp(0.0f, 0.5f, clamp01(std::abs(value - 0.5f) / 0.25f));
+        return out;
+    }
+private:
     char* readByte() {
         char* byte = new char[1];
         this->file.read(byte, 1);
@@ -648,13 +953,14 @@ public:
         joint.guid = this->readString();
         return joint;
     }
-    BridgeEdge deserializeEdge() {
+    BridgeEdge deserializeEdge(int version) {
         BridgeEdge edge{};
         edge.material_type = (BridgeMaterialType)this->readInt32();
         edge.node_a_guid = this->readString();
         edge.node_b_guid = this->readString();
         edge.joint_a_part = (SplitJointPart)this->readInt32();
         edge.joint_b_part = (SplitJointPart)this->readInt32();
+        edge.guid = (version >= 11) ? this->readString() : "";
         return edge;
     }
     BridgeSpring deserializeSpring() {
@@ -676,20 +982,6 @@ public:
     }
     static float lerp(float a, float b, float t) {
         return a + (b - a) * t;
-    }
-    static float fixPistonNormalizedValue(float value) {
-        float out;
-        if (value < 0.25f) {
-            out = lerp(1.0f, 0.5f, clamp01(value / 0.25f));
-        }
-        if (value > 0.75f) {
-            out = lerp(0.5f, 1.0f, clamp01((value - 0.75f) / 0.25f));
-        }
-        out = lerp(0.0f, 0.5f, clamp01(std::abs(value - 0.5f) / 0.25f));
-        if (out != value) {
-            Utils::log_info_d("Fixed piston normalized value: %s -> %s", U::floatc(value).c_str(), U::floatc(out).c_str());
-        }
-        return out;
     }
     Piston deserializePiston(int version) {
         Piston piston{};
@@ -724,12 +1016,15 @@ public:
             for (int i = 0; i < count; i++) {
                 phase.bridge_split_joints.push_back(this->deserializeSplitJoint());
             }
-            return phase;
+        } else {
+            count = this->readInt32();
+            for (int i = 0; i < count; i++) {
+                // garbage data
+                this->readString();
+            }
         }
-        count = this->readInt32();
-        for (int i = 0; i < count; i++) {
-            // garbage data
-            this->readString();
+        if (version > 9) {
+            phase.disable_new_additions = this->readBool();
         }
         return phase;
     }
@@ -742,6 +1037,9 @@ public:
         bridge.version = this->readInt32();
         Utils::ensureReasonable(bridge.version, 0, 100, 0, 50);
         Utils::log_info_d("Bridge version: %s", U::intc(bridge.version).c_str());
+        if (bridge.version > MAX_BRIDGE_VERSION) {
+            Utils::log_warn_d("Bridge saved with a newer version of the bridge format. This may cause problems.");
+        }
 
         // If the version is less than 2, we don't have any of the following fields.
         if (bridge.version < 2) {
@@ -760,7 +1058,7 @@ public:
         count = this->readInt32();
         Utils::log_info_d("Bridge edge count: %s", U::intc(count).c_str());
         for (int i = 0; i < count; i++) {
-            bridge.edges.push_back(this->deserializeEdge());
+            bridge.edges.push_back(this->deserializeEdge(bridge.version));
         }
 
         // If the version is 7 or above, we read the bridge's springs.
@@ -823,6 +1121,12 @@ public:
         if (version >= 8) {
             vehicle.speed = this->readFloat();
         }
+        // If the version is 26 or above, we read the vehicle's rotation.
+        if (version >= 26) {
+            vehicle.rot = this->readQuaternion();
+            vehicle.rotation_degrees = this->readFloat();
+        }
+
         return vehicle;
     }
     std::vector<ZAxisVehicle> deserializeZAxisVehicles(int version) {
@@ -1311,7 +1615,7 @@ public:
         }
 
         // check if that's everything
-        long pos = this->file.tellg();
+        long pos = (long) this->file.tellg();
         if (pos == this->file.seekg(0, std::ios::end).tellg()) {
             return mod_data;
         }
@@ -1338,172 +1642,11 @@ public:
             Utils::log_info_d("Name: \x1B[1;95m" + name + "\x1B[0m");
             Utils::log_info_d("Version: \x1B[1;95m" + version + "\x1B[0m");
 
-            char* customModSaveData = reinterpret_cast<char *>(this->readByteArray());
+            char *customModSaveData = reinterpret_cast<char *>(this->readByteArray());
 
             mod_data.mod_save_data.push_back(ModSaveData{customModSaveData, name, version});
         }
         return mod_data;
-    }
-    Layout deserializeLayout() {
-        Layout layout;
-        // NOTE: This has to be ordered, as it reads the file in the order it is written
-
-        // first, we get the version, which is used to determine which fields are present
-        this->getVersion(layout.version, layout.isModded);
-
-        if (layout.isModded) {
-            Utils::log_info_d("Using modded layout support");
-        }
-
-        Utils::ensureReasonable(layout.version, 0, 100, 0, 50);
-        Utils::log_info_d("Deserializing layout version %s", U::intc(layout.version).c_str());
-        // then we get the stub key, which is the theme of the layout, e.g. "Western"
-        layout.stubKey = this->getStubKey();
-        Utils::log_info_d("Layout stub key: %s", layout.stubKey.c_str());
-        // then we get the name of the layout, e.g. "Western"
-        // this is just used for aesthetics
-        Utils::log_info_d("Layout theme name: %s", Utils::prettyPrintStubKeyToTheme(layout.stubKey).c_str());
-
-        if (layout.version >= 19) {
-            // if the version is 19 or higher, we need to deserialize the anchors
-            layout.anchors = this->deserializeAnchors();
-        }
-
-        if (layout.version >= 5) {
-            // if the version is 5 or higher, we need to deserialize the hydraulic phases
-            layout.phases = this->deserializePhases();
-        }
-
-        // if the version is greater than 4, we can call the deserializeBridge function.
-        if (layout.version > 4) {
-            layout.bridge = this->deserializeBridge();
-        } else {
-            Utils::log_warn_d("Deserializing bridge with version under 5, consider upgrading");
-            // otherwise, we have a lot less bridge data to deal with.
-            // first, we deserialize the joints.
-            int count = this->readInt32();
-            Utils::log_info_d("Bridge joint count: %s", U::intc(count).c_str());
-            for (int i = 0; i < count; i++) {
-                layout.bridge.joints.push_back(this->deserializeJoint());
-            }
-
-            // next, the edges.
-            count = this->readInt32();
-            Utils::log_info_d("Bridge edge count: %s", U::intc(count).c_str());
-            for (int i = 0; i < count; i++) {
-                layout.bridge.edges.push_back(this->deserializeEdge());
-            }
-
-            // last, the pistons.
-            count = this->readInt32();
-            Utils::log_info_d("Bridge piston count: %s", U::intc(count).c_str());
-            for (int i = 0; i < count; i++) {
-                layout.bridge.pistons.push_back(this->deserializePiston(layout.bridge.version));
-            }
-        }
-
-        // After that, if the version is 7 or greater, we can deserialize the Z-axis vehicles (boats, etc.).
-        if (layout.version >= 7) {
-            layout.zAxisVehicles = this->deserializeZAxisVehicles(layout.version);
-        }
-
-        // Then, we can deserialize the vehicles.
-        layout.vehicles = this->deserializeVehicles();
-
-        // Next, we deserialize the vehicle stop triggers.
-        layout.vehicleStopTriggers = this->deserializeVehicleStopTriggers();
-
-        // If the version is below 20, we deserialize the theme objects, though it's obsolete.
-        // This isn't actually collected or used when the layout is loaded in the game, but it's still useful for debugging.
-        if (layout.version < 20) {
-            layout.themeObjects_OBSOLETE = this->deserializeThemeObjects_OBSOLETE();
-        }
-
-        // After that, we can deserialize the event timelines.
-        layout.eventTimelines = this->deserializeEventTimelines(layout.version);
-
-        // Then, we deserialize checkpoints.
-        layout.checkpoints = this->deserializeCheckpoints();
-
-        // Next, we deserialize terrain stretches.
-        layout.terrainStretches = this->deserializeTerrainIslands(layout.version);
-
-        // Deserialize the platforms.
-        layout.platforms = this->deserializePlatforms(layout.version);
-
-        // Then, the ramps.
-        layout.ramps = this->deserializeRamps(layout.version);
-
-        // Hydraulic phases are here if the layout version is less than 5.
-        if (layout.version < 5) {
-            layout.phases = this->deserializePhases();
-        }
-
-        // Next, we deserialize the vehicle restart phases.
-        layout.vehicleRestartPhases = this->deserializeVehicleRestartPhases();
-
-        // Next, flying objects such as airplanes, blimps, etc.
-        layout.flyingObjects = this->deserializeFlyingObjects();
-
-        // Then, we deserialize rocks.
-        layout.rocks = this->deserializeRocks();
-
-        // After that, we deserialize water blocks.
-        layout.waterBlocks = this->deserializeWaterBlocks(layout.version);
-
-        // If the version is less than 5, there's some garbage data here.
-        if (layout.version < 5) {
-            Utils::log_warn_d("Deserializing garbage data with version under 5");
-            int count = this->readInt32();
-            int count2;
-            for (int i = 0; i < count; i++) {
-                this->readString();
-                count2 = this->readInt32();
-                for (int j = 0; j < count2; j++) {
-                    this->readString();
-                }
-            }
-        }
-
-        // Now, we can deserialize the budget.
-        layout.budget = this->deserializeBudget();
-
-        // Then, the settings.
-        layout.settings = this->deserializeSettings();
-
-        // Now, if the version is 9 or above, we have custom shapes to deal with.
-        if (layout.version >= 9) {
-            layout.customShapes = this->deserializeCustomShapes(layout.version);
-        }
-
-        // Deserialize workshop binary (version 15+)
-        if (layout.version >= 15) {
-            layout.workshop = this->deserializeWorkshop(layout.version);
-        }
-
-        // Deserialize support pillars (version 17+)
-        if (layout.version >= 17) {
-            layout.supportPillars = this->deserializeSupportPillars();
-        }
-
-        // Finally, we can deserialize pillars. (version 18+)
-        if (layout.version >= 18) {
-            layout.pillars = this->deserializePillars();
-        }
-
-        // Now, some checks:
-        // First, we check to make sure we are at the end of the file.
-        long pos = this->file.tellg();
-        // Modded layouts have extra mod data at the end.
-        if (!layout.isModded) return layout;  // We can end here if there's no mod data.
-
-        // MOD SUPPORT: PTF stores mod data at the end, indicated by a negative version at the start.
-        // Notify user that we're deserializing mod data.
-        Utils::log_info_d("Deserializing mod data...");
-        // Then, we deserialize the mod data.
-        layout.modData = this->deserializePTFModData();
-        // Then, we can return the layout.
-        return layout;
     }
 };
 
@@ -1525,6 +1668,12 @@ public:
     ~Serializer() {
         this->file.close();
     }
+    void serializeLayout() {
+        this->serializePreBridgeBinary();
+        this->serializeBridgeBinary();
+        this->serializePostBridgeBinary();
+    }
+private:
     void writeInt32(int32_t value) {
         this->file.write(reinterpret_cast<char *>(&value), sizeof(int32_t));
     }
@@ -1660,6 +1809,7 @@ public:
                 this->writeString(bridge_split_joint.guid); // Bridge split joint GUID
                 this->writeInt32(bridge_split_joint.state); // Bridge split joint state
             }
+            this->writeBool(phase.disable_new_additions);
         }
         U::log_info_s("Serialized %s hydraulic phases", U::intc((int)bridge.phases.size()).c_str());
 
@@ -1683,6 +1833,8 @@ public:
             this->writeString(vehicle.guid); // GUID
             this->writeFloat(vehicle.time_delay); // Time delay (seconds)
             this->writeFloat(vehicle.speed); // Speed
+            this->writeQuaternion(vehicle.rot); // Rotation
+            this->writeFloat(vehicle.rotation_degrees); // Rotation degrees
         }
         U::log_info_s("Serialized %s z-axis vehicles", U::intc((int)this->layout.zAxisVehicles.size()).c_str());
 
@@ -1800,6 +1952,12 @@ public:
             this->writeBool(ramp.flipped_horizontal); // Flipped horizontal
             this->writeBool(ramp.hide_legs); // Hide legs
             this->writeBool(ramp.flipped_legs); // Flipped legs
+
+            // Line points
+            this->writeInt32((int)ramp.line_points.size());
+            for (const Vec2 &line_point : ramp.line_points) {
+                this->writeVector2(line_point);
+            }
         }
         U::log_info_s("Serialized %s ramps", U::intc((int)this->layout.ramps.size()).c_str());
 
@@ -1937,10 +2095,651 @@ public:
 
         this->file << std::flush;
     }
-    void serializeLayout() {
-        this->serializePreBridgeBinary();
-        this->serializeBridgeBinary();
-        this->serializePostBridgeBinary();
+};
+
+class SimpleBridgeDeserializer {
+public:
+    char* bytes;
+    int offset{};
+    explicit SimpleBridgeDeserializer(char* bytes) {
+        this->bytes = bytes;
+    }
+    Bridge deserializeBridge() {
+        Bridge bridge;
+
+        bridge.version = this->readInt32();
+        U::log_info_d("Bridge version: %s", U::intc(bridge.version).c_str());
+        if (bridge.version > MAX_BRIDGE_VERSION) {
+            Utils::log_warn_d("Bridge saved with a newer version of the bridge format. This may cause problems.");
+        }
+
+        if (bridge.version < 2) {
+            return bridge;  // v2- not supported (neither in game)
+        }
+
+        // Joints
+        int num = this->readInt32();
+        U::log_info_d("Deserializing %s joints", U::intc(num).c_str());
+        for (int i = 0; i < num; i++) {
+            BridgeJoint joint;
+            joint.pos = this->readVector3();
+            joint.is_anchor = this->readBool();
+            joint.is_split = this->readBool();
+            joint.guid = this->readString();
+            bridge.joints.push_back(joint);
+        }
+
+        // Edges
+        num = this->readInt32();
+        U::log_info_d("Deserializing %s edges", U::intc(num).c_str());
+        for (int i = 0; i < num; i++) {
+            BridgeEdge edge;
+            edge.material_type = (BridgeMaterialType)this->readInt32();
+            edge.node_a_guid = this->readString();
+            edge.node_b_guid = this->readString();
+            edge.joint_a_part = (SplitJointPart)this->readInt32();
+            edge.joint_b_part = (SplitJointPart)this->readInt32();
+        }
+
+        // Springs in v7+
+        if (bridge.version >= 7) {
+            num = this->readInt32();
+            U::log_info_d("Deserializing %s springs", U::intc(num).c_str());
+            for (int i = 0; i < num; i++) {
+                BridgeSpring spring;
+                spring.normalized_value = this->readFloat();
+                spring.node_a_guid = this->readString();
+                spring.node_b_guid = this->readString();
+                spring.guid = this->readString();
+                bridge.springs.push_back(spring);
+            }
+        }
+
+        // Pistons
+        num = this->readInt32();
+        U::log_info_d("Deserializing %s pistons", U::intc(num).c_str());
+        for (int i = 0; i < num; i++) {
+            Piston piston;
+            piston.normalized_value = this->readFloat();
+            piston.node_a_guid = this->readString();
+            piston.node_b_guid = this->readString();
+            piston.guid = this->readString();
+
+            if (bridge.version < 8) {
+                piston.normalized_value = Deserializer::fixPistonNormalizedValue(piston.normalized_value);
+            }
+
+            bridge.pistons.push_back(piston);
+        }
+
+        // Hydraulic phases
+        num = this->readInt32();
+        U::log_info_d("Deserializing %s hydraulic phases", U::intc(num).c_str());
+        for (int i = 0; i < num; i++) {
+            HydraulicsControllerPhase phase;
+            phase.hydraulics_phase_guid = this->readString();
+
+            // piston guids
+            int num_pistons = this->readInt32();
+            for (int j = 0; j < num_pistons; j++) {
+                phase.piston_guids.push_back(this->readString());
+            }
+
+            if (bridge.version > 2) {
+                int split_joint_count = this->readInt32();
+                for (int j = 0; j < split_joint_count; j++) {
+                    BridgeSplitJoint split_joint;
+                    split_joint.guid = this->readString();
+                    split_joint.state = (SplitJointState)this->readInt32();
+                    phase.bridge_split_joints.push_back(split_joint);
+                }
+            } else {
+                // garbage data
+                int count = this->readInt32();
+                for (int j = 0; j < count; j++) {
+                    this->readString();
+                }
+            }
+
+            if (bridge.version > 9) {
+                phase.disable_new_additions = this->readBool();
+            }
+        }
+
+        // Garbage data (v5)
+        if (bridge.version == 5) {
+            int count = this->readInt32();
+            for (int i = 0; i < count; i++) {
+                this->readString();
+            }
+        }
+
+        // Anchors (v6+)
+        if (bridge.version >= 6) {
+            num = this->readInt32();
+            U::log_info_d("Deserializing %s anchors", U::intc(num).c_str());
+            for (int i = 0; i < num; i++) {
+                BridgeJoint anchor;
+                anchor.pos = this->readVector3();
+                anchor.is_anchor = this->readBool();
+                anchor.is_split = this->readBool();
+                anchor.guid = this->readString();
+                bridge.anchors.push_back(anchor);
+            }
+        }
+
+        // Random bool at end (v4-v8)
+        if (bridge.version >= 4 && bridge.version < 9) {
+            this->readBool();
+        }
+
+        return bridge;
+    }
+private:
+    char* readByte() {
+        char* b = &this->bytes[this->offset];
+        this->offset++;
+        return b;
+    }
+    char* readBytes(int count) {
+        char* b = new char[count];
+        for (int i = 0; i < count; i++) {
+            b[i] = this->bytes[this->offset + i];
+        }
+        this->offset += count;
+        return b;
+    }
+    bool readBool() {
+        bool value = *reinterpret_cast<bool *>(this->readByte());
+        return value;
+    }
+    int16_t readInt16() {
+        int16_t value = *reinterpret_cast<int16_t *>(this->readBytes(sizeof(int16_t)));
+        return value;
+    }
+    uint16_t readUInt16() {
+        uint16_t value = *reinterpret_cast<uint16_t *>(this->readBytes(sizeof(uint16_t)));
+        return value;
+    }
+    int32_t readInt32() {
+        int32_t value = *reinterpret_cast<int32_t *>(this->readBytes(sizeof(int32_t)));
+        return value;
+    }
+    float readFloat() {
+        float value = *reinterpret_cast<float *>(this->readBytes(sizeof(float)));
+        return value;
+    }
+    std::string readString() {
+        int length = this->readUInt16();
+        char* data = this->readBytes(length);
+        std::string str(data, length);
+        delete[] data;
+        return str;
+    }
+    Vec2 readVector2() {
+        Vec2 value{};
+        value.x = this->readFloat();
+        value.y = this->readFloat();
+        return value;
+    }
+    Vec3 readVector3() {
+        Vec3 value{};
+        value.x = this->readFloat();
+        value.y = this->readFloat();
+        value.z = this->readFloat();
+        return value;
+    }
+};
+
+class SlotDeserializer {
+public:
+    std::string path;
+    std::ifstream file;
+    explicit SlotDeserializer (const std::string &path) {
+        this->path = path;
+        this->file.open(path, std::ios::binary);
+        if (!this->file.is_open()) {
+            U::log_error_s("Failed to open file '%s'", path.c_str());
+            exit(1);
+        }
+    }
+    SaveSlot deserializeSlot() {
+        // So, a bit on how this works:
+        //   This is basically an *extremely* condensed version of OdinSerializer.
+        //   Since we don't have the correct types available to us, we have a custom
+        //   override, which is the BridgeSaveSlotData struct. As this code is only
+        //   meant for a specific purpose, we don't have to deserialize in the
+        //   conventional way. Instead, we just read the data we expect, and ensure
+        //   it's correct, which may mean same name, same type, etc.
+        //   We aren't worrying about nodes here, since we don't need to act like
+        //   this is multilevel data.
+        //   One thing about this format is that it's very type-specific. For example,
+        //   it's not possible to deserialize a string as a float. This is because the
+        //   type, assuming a built-in, is read from a single byte, and ensured it's
+        //   in the BinaryEntryType enum.
+
+        // create a SaveSlot object
+        SaveSlot slot;
+
+        enterNode();  // enter the root node
+
+        // First, read the version number
+        EntryTypeReturn et = this->peekEntryType();
+        assert(et.type == EntryType::Integer);  // make sure it's an integer
+        assert(et.name == "m_Version");
+        int version = this->readInt(); // read the version number
+        U::log_info_d("Save slot version: " + U::intc(version));
+        // warn the user if the version is greater than the current max fully supported version
+        if (version > MAX_SLOT_VERSION) {
+            Utils::log_warn_d("Slot saved with a newer version of the slot format. This may cause problems.");
+        }
+        slot.version = version;
+
+        // Next, read the physics version
+        et = this->peekEntryType();
+        assert(et.type == EntryType::Integer);  // make sure it's an integer
+        assert(et.name == "m_PhysicsVersion");
+        int physics_version = this->readInt(); // read the physics version number
+        U::log_info_d("Save slot physics version: " + U::intc(physics_version));
+        // warn the user if the physics version is greater than the current max fully supported physics version
+        if (physics_version > MAX_PHYSICS_VERSION) {
+            U::log_warn_d("Save slot physics version is greater than the current max fully supported physics version, bugs may occur");
+        }
+        slot.physicsVersion = physics_version;
+
+        // Next, the slot ID
+        et = this->peekEntryType();
+        assert(et.type == EntryType::Integer);  // make sure it's an integer
+        assert(et.name == "m_SlotID");
+        int slot_id = this->readInt(); // read the slot ID
+        U::log_info_d("Save slot ID: " + U::intc(slot_id));
+        slot.slotId = slot_id;
+
+        // Next, the slot display name
+        et = this->peekEntryType();
+        assert(et.type == EntryType::String);  // make sure it's a string
+        assert(et.name == "m_DisplayName");
+        std::string slot_name = this->readString(); // read the slot name
+        U::log_info_d("Save slot name: " + slot_name);
+        slot.displayName = slot_name;
+
+        // Next, the slot filename-o ./brokenslot slots/LongDrawbridge_Auto-Save.slot
+        et = this->peekEntryType();
+        assert(et.type == EntryType::String);  // make sure it's a string
+        assert(et.name == "m_SlotFilename");
+        std::string slot_filename = this->readString(); // read the slot filename
+        U::log_info_d("Save slot filename: " + slot_filename);
+        slot.fileName = slot_filename;
+
+        // Next, the budget (price of bridge)
+        et = this->peekEntryType();
+        assert(et.type == EntryType::Integer);  // make sure it's an integer
+        assert(et.name == "m_Budget");
+        int budget = this->readInt(); // read the budget
+        U::log_info_d("Save slot budget: $" + U::intc(budget, 0, 10000000, 0, 10000000));
+        slot.budget = budget;
+
+        // Next, the last write time in C# ticks
+        et = this->peekEntryType();
+        assert(et.type == EntryType::Integer);  // make sure it's a long (considered an integer in EntryType)
+        assert(et.name == "m_LastWriteTimeTicks");
+        long last_write_time = this->readLong(); // read the last write time
+        U::log_info_d("Save slot last write time: " + U::ticks_to_datetime(last_write_time));
+        slot.lastWriteTimeTicks = last_write_time;
+
+        // Next, the bridge, which is a bit weird
+        // Enter the node
+        enterNode();
+
+        // read the bridge data
+        et = this->peekEntryType();
+        assert(et.type == EntryType::PrimitiveArrayType);  // make sure it's a primitive array
+        int num = this->readInt();
+        int num2 = this->readInt();
+        int num3 = num * num2;
+        // read num3 bytes from the stream
+        char *bridge_data = new char[num3];
+        this->file.read(bridge_data, num3);
+
+        U::log_info_d("Loading bridge data of size %s...", U::intc(num3, 0, 100000000, 0, 100000000).c_str());
+        SimpleBridgeDeserializer bd(bridge_data);
+        Bridge bridge = bd.deserializeBridge();
+        U::log_info_d("Bridge loaded");
+        slot.bridge = bridge;
+
+        // make sure we are at an end of node
+        et = this->peekEntryType();
+        assert(et.type == EntryType::EndOfNodeType);
+        U::log_info_d("Exiting node");
+
+        // thumbnail data
+        et = this->peekEntryType();
+        assert(et.name == "m_Thumb");
+        if (et.type == EntryType::Null) {
+            U::log_info_d("No thumbnail in save slot");
+        } else {
+            // for some reason, there is a type ID defining byte here
+            this->file.get();
+            // typename
+            this->readInt();
+            // node ID
+            int node_id = this->readInt();
+            U::log_info_d("Entering node id " + std::to_string(node_id));
+
+            et = this->peekEntryType();
+            assert(et.type == EntryType::PrimitiveArrayType);  // make sure it's a primitive array
+            num = this->readInt();
+            num2 = this->readInt();
+            num3 = num * num2;
+            U::log_info_d("Thumbnail data size: " + U::intc(num3, 0, 10000000, 0, 10000000));
+            char* thumbnail_data = new char[num3];
+            this->file.read(thumbnail_data, num3);
+            slot.thumbnail = thumbnail_data;
+
+            et = this->peekEntryType();
+            assert(et.type == EntryType::EndOfNodeType);
+            U::log_info_d("Exiting node");
+        }
+
+        // If the layout uses unlimited materials
+        et = this->peekEntryType();
+        assert(et.name == "m_UsingUnlimitedMaterials");
+        assert(et.type == EntryType::Boolean);
+        bool unlimited_materials = this->readBool();
+        U::log_info_d("Unlimited materials: %s", unlimited_materials ? "\x1B[1;92myes\x1B[0m" : "\x1B[1;91mno\x1B[0m");
+        slot.unlimitedMaterials = unlimited_materials;
+
+        // If the layout uses unlimited budget
+        et = this->peekEntryType();
+        assert(et.name == "m_UsingUnlimitedBudget");
+        assert(et.type == EntryType::Boolean);
+        bool unlimited_budget = this->readBool();
+        U::log_info_d("Unlimited budget: %s", unlimited_budget ? "\x1B[1;92myes\x1B[0m" : "\x1B[1;91mno\x1B[0m");
+        slot.unlimitedBudget = unlimited_budget;
+
+        // End of node
+        et = this->peekEntryType();
+        assert(et.type == EntryType::EndOfNodeType);
+        U::log_info_d("Exiting node");
+
+        return slot;
+    }
+    ~SlotDeserializer() {
+        this->file.close();
+    }
+private:
+    int readInt() {
+        int i;
+        this->file.read(reinterpret_cast<char *>(&i), sizeof(int));
+        return i;
+    }
+    std::string readString() {
+        int num = this->file.get();
+        if (num < 0) {
+            return "";
+        }
+        if (num == 0) {
+            int num2 = this->readInt();
+            char* bytes = new char[num2];
+            this->file.read(bytes, num2);
+            std::string str(bytes, num2);
+            delete[] bytes;
+            return str;
+        }
+        if (num == 1) {
+            int length = this->readInt();
+            std::u16string str(length, '\0');
+            this->file.read((char*)&str[0], length * 2);  // null spaced
+            // convert u16 to u8
+            std::wstring_convert<std::codecvt_utf8_utf16<char16_t>,char16_t> convert;
+            return std::string(convert.to_bytes(str));
+        }
+        return "";
+    }
+    EntryTypeReturn peekEntryType() {
+        int c = this->file.get();
+        if (c == EOF) {
+            return EntryTypeReturn{EntryType::EndOfStreamType, ""};
+        }
+        auto bt = (BinaryEntryType)c;
+        std::string name;
+
+        switch (bt) {
+            case BinaryEntryType::NamedStartOfReferenceNode:
+            case BinaryEntryType::NamedStartOfStructNode:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::StartOfNode, name};
+                break;
+            case BinaryEntryType::UnnamedStartOfReferenceNode:
+            case BinaryEntryType::UnnamedStartOfStructNode:
+                return EntryTypeReturn{EntryType::StartOfNode, ""};
+                break;
+            case BinaryEntryType::EndOfNode:
+                return EntryTypeReturn{EntryType::EndOfNodeType, ""};
+                break;
+            case BinaryEntryType::StartOfArray:
+                return EntryTypeReturn{EntryType::StartOfArrayType, ""};
+                break;
+            case BinaryEntryType::EndOfArray:
+                return EntryTypeReturn{EntryType::EndOfArrayType, ""};
+                break;
+            case BinaryEntryType::PrimitiveArray:
+                return EntryTypeReturn{EntryType::PrimitiveArrayType, ""};
+                break;
+            case BinaryEntryType::NamedInternalReference:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::InternalReference, name};
+                break;
+            case BinaryEntryType::UnnamedInternalReference:
+                return EntryTypeReturn{EntryType::InternalReference, ""};
+                break;
+            case BinaryEntryType::NamedExternalReferenceByIndex:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::ExternalReferenceByIndex, name};
+                break;
+            case BinaryEntryType::UnnamedExternalReferenceByIndex:
+                return EntryTypeReturn{EntryType::ExternalReferenceByIndex, ""};
+                break;
+            case BinaryEntryType::NamedExternalReferenceByGuid:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::ExternalReferenceByGuid, name};
+                break;
+            case BinaryEntryType::UnnamedExternalReferenceByGuid:
+                return EntryTypeReturn{EntryType::ExternalReferenceByGuid, ""};
+                break;
+            case BinaryEntryType::NamedSByte:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Integer, name};
+                break;
+            case BinaryEntryType::UnnamedSByte:
+                return EntryTypeReturn{EntryType::Integer, ""};
+                break;
+            case BinaryEntryType::NamedByte:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Integer, name};
+                break;
+            case BinaryEntryType::UnnamedByte:
+                return EntryTypeReturn{EntryType::Integer, ""};
+                break;
+            case BinaryEntryType::NamedShort:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Integer, name};
+                break;
+            case BinaryEntryType::UnnamedShort:
+                return EntryTypeReturn{EntryType::Integer, ""};
+                break;
+            case BinaryEntryType::NamedUShort:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Integer, name};
+                break;
+            case BinaryEntryType::UnnamedUShort:
+                return EntryTypeReturn{EntryType::Integer, ""};
+                break;
+            case BinaryEntryType::NamedInt:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Integer, name};
+                break;
+            case BinaryEntryType::UnnamedInt:
+                return EntryTypeReturn{EntryType::Integer, ""};
+                break;
+            case BinaryEntryType::NamedUInt:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Integer, name};
+                break;
+            case BinaryEntryType::UnnamedUInt:
+                return EntryTypeReturn{EntryType::Integer, ""};
+                break;
+            case BinaryEntryType::NamedLong:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Integer, name};
+                break;
+            case BinaryEntryType::UnnamedLong:
+                return EntryTypeReturn{EntryType::Integer, ""};
+                break;
+            case BinaryEntryType::NamedULong:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Integer, name};
+                break;
+            case BinaryEntryType::UnnamedULong:
+                return EntryTypeReturn{EntryType::Integer, ""};
+                break;
+            case BinaryEntryType::NamedFloat:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::FloatingPoint, name};
+                break;
+            case BinaryEntryType::UnnamedFloat:
+                return EntryTypeReturn{EntryType::FloatingPoint, ""};
+                break;
+            case BinaryEntryType::NamedDouble:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::FloatingPoint, name};
+                break;
+            case BinaryEntryType::UnnamedDouble:
+                return EntryTypeReturn{EntryType::FloatingPoint, ""};
+                break;
+            case BinaryEntryType::NamedDecimal:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::FloatingPoint, name};
+                break;
+            case BinaryEntryType::UnnamedDecimal:
+                return EntryTypeReturn{EntryType::FloatingPoint, ""};
+                break;
+            case BinaryEntryType::NamedChar:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::String, name};
+                break;
+            case BinaryEntryType::UnnamedChar:
+                return EntryTypeReturn{EntryType::String, ""};
+                break;
+            case BinaryEntryType::NamedString:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::String, name};
+                break;
+            case BinaryEntryType::UnnamedString:
+                return EntryTypeReturn{EntryType::String, ""};
+                break;
+            case BinaryEntryType::NamedGuid:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Guid, name};
+                break;
+            case BinaryEntryType::UnnamedGuid:
+                return EntryTypeReturn{EntryType::Guid, ""};
+                break;
+            case BinaryEntryType::NamedBoolean:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Boolean, name};
+                break;
+            case BinaryEntryType::UnnamedBoolean:
+                return EntryTypeReturn{EntryType::Boolean, ""};
+                break;
+            case BinaryEntryType::NamedNull:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::Null, name};
+                break;
+            case BinaryEntryType::UnnamedNull:
+                return EntryTypeReturn{EntryType::Null, ""};
+                break;
+            case BinaryEntryType::TypeName:
+            case BinaryEntryType::TypeID:
+                U::log_error_d("BinaryEntryType::TypeName or BinaryEntryType::TypeID cannot be peeked");
+                exit(1);
+                break;
+            case BinaryEntryType::EndOfStream:
+                return EntryTypeReturn{EntryType::EndOfStreamType, ""};
+                break;
+            case BinaryEntryType::NamedExternalReferenceByString:
+                name = this->readString();
+                return EntryTypeReturn{EntryType::ExternalReferenceByString, name};
+                break;
+            case BinaryEntryType::UnnamedExternalReferenceByString:
+                return EntryTypeReturn{EntryType::ExternalReferenceByString, ""};
+                break;
+            default:
+                U::log_error_d("Unknown BinaryEntryType: " + std::to_string(bt));
+                return EntryTypeReturn{EntryType::InvalidType, ""};
+                break;
+        }
+    }
+    TypeEntryReturn readTypeEntry() {
+        int num = this->file.get();
+        if (num < 0) {
+            return {};
+        }
+        auto bt = (BinaryEntryType)num;
+        if (bt == BinaryEntryType::TypeName) {
+            int key = this->readInt();
+            std::string type_name = this->readString();
+            // split by ', ' to get the type name and the assembly name
+            std::vector<std::string> type_names;
+            std::stringstream ss(type_name);
+            std::string item;
+            while (std::getline(ss, item, ',')) {
+                type_names.push_back(item);
+            }
+
+            if (type_names.size() != 2) {
+                U::log_error_d("Type name is not in the format of type_name, assembly_name");
+                exit(1);
+            }
+            if (type_names[0] == "BridgeSaveSlotData") {
+                U::log_info_d("Using override for type BridgeSaveSlotData");
+            }
+
+            // remove the space before the assembly name
+            type_names[1].erase(0, 1);
+
+            return TypeEntryReturn{type_names[0], type_names[1]};
+        } else if (bt == BinaryEntryType::TypeID) {
+            U::log_info_d("Type ID read, will assume override in deserializer is present and ignore this value");
+        } else {
+            U::log_error_d("Unknown type entry flag: " + std::to_string(bt));
+            exit(1);
+        }
+        return {};
+    }
+    bool readBool() {
+        bool res = this->file.get() == 1;
+        return res;
+    }
+    long readLong() {
+        uint64_t  value =
+            static_cast<uint64_t>(this->file.get()) |
+            static_cast<uint64_t>(this->file.get()) << 8 |
+            static_cast<uint64_t>(this->file.get()) << 16 |
+            static_cast<uint64_t>(this->file.get()) << 24 |
+            static_cast<uint64_t>(this->file.get()) << 32 |
+            static_cast<uint64_t>(this->file.get()) << 40 |
+            static_cast<uint64_t>(this->file.get()) << 48 |
+            static_cast<uint64_t>(this->file.get()) << 56;
+        return static_cast<long>(value);
+    }
+    void enterNode() {
+        EntryTypeReturn et = this->peekEntryType();
+        if (et.type == EntryType::StartOfNode) {
+            TypeEntryReturn type = this->readTypeEntry();
+            int id = this->readInt();
+            Utils::log_info_d("Entering node id " + std::to_string(id));
+        }
     }
 };
 
@@ -2021,6 +2820,7 @@ void dump_json(Layout &layout, const std::string& path) {
             joint_json["m_SplitJointState"] = joint.state;
             phase_json["m_BridgeSplitJoints"].push_back(joint_json);
         }
+        phase_json["m_DisableNewAdditions"] = phase.disable_new_additions;
         phases.push_back(phase_json);
     }
     bridge["m_HydraulicsController"]["m_Phases"] = phases;
@@ -2047,6 +2847,11 @@ void dump_json(Layout &layout, const std::string& path) {
         zAxisVehicle_json["m_TimeDelaySeconds"] = zAxisVehicle.time_delay;
         zAxisVehicle_json["m_PrefabName"] = zAxisVehicle.prefab_name;
         zAxisVehicle_json["m_Speed"] = zAxisVehicle.speed;
+        zAxisVehicle_json["m_Rot"]["x"] = zAxisVehicle.rot.x;
+        zAxisVehicle_json["m_Rot"]["y"] = zAxisVehicle.rot.y;
+        zAxisVehicle_json["m_Rot"]["z"] = zAxisVehicle.rot.z;
+        zAxisVehicle_json["m_Rot"]["w"] = zAxisVehicle.rot.w;
+        zAxisVehicle_json["m_RotationDegrees"] = zAxisVehicle.rotation_degrees;
         j["m_ZedAxisVehicles"].push_back(zAxisVehicle_json);
     }
 
@@ -2075,6 +2880,7 @@ void dump_json(Layout &layout, const std::string& path) {
         vehicle_json["m_OrderedCheckpoints"] = vehicle.ordered_checkpoints;
         vehicle_json["m_DisplayName"] = vehicle.display_name;
         vehicle_json["m_RotationDegrees"] = vehicle.rotation_degrees;
+        vehicle_json["m_TargetSpeed"] = vehicle.target_speed;
         vehicle_json["m_UndoGuid"] = nullptr;
         j["m_Vehicles"].push_back(vehicle_json);
     }
@@ -2459,6 +3265,7 @@ Layout load_json(std::string &json_str) {
         for (auto &pg : p["m_PistonGuids"]) {
             phase.piston_guids.push_back(pg.get<std::string>());
         }
+        phase.disable_new_additions = p["m_DisableNewAdditions"];
         layout.bridge.phases.push_back(phase);
     }
 
@@ -2580,6 +3387,11 @@ Layout load_json(std::string &json_str) {
         z.prefab_name = zv["m_PrefabName"].get<std::string>();
         z.speed = zv["m_Speed"].get<float>();
         z.time_delay = zv["m_TimeDelaySeconds"].get<float>();
+        z.rot.x = zv["m_Rot"]["x"].get<float>();
+        z.rot.y = zv["m_Rot"]["y"].get<float>();
+        z.rot.z = zv["m_Rot"]["z"].get<float>();
+        z.rot.w = zv["m_Rot"]["w"].get<float>();
+        z.rotation_degrees = zv["m_RotationDegrees"].get<float>();
         layout.zAxisVehicles.push_back(z);
     }
 
@@ -2819,6 +3631,100 @@ Layout load_json(std::string &json_str) {
     return layout;
 }
 
+void dump_slot_json(const SaveSlot& slot, const std::string& path) {
+    json j;
+    j["m_Version"] = slot.version;
+    j["m_PhysicsVersion"] = slot.physicsVersion;
+    j["m_SlotID"] = slot.slotId;
+    j["m_DisplayName"] = slot.displayName;
+    j["m_SlotFileName"] = slot.fileName;
+    j["m_Budget"] = slot.budget;
+    j["m_LastWriteTimeTicks"] = slot.lastWriteTimeTicks;
+    auto b = nlohmann::json::object();
+    b["m_Version"] = slot.bridge.version;
+    b["m_BridgeJoints"] = nlohmann::json::array();
+    for (const BridgeJoint& jnt : slot.bridge.joints) {
+        auto joint = nlohmann::json::object();
+        joint["m_Pos"]["x"] = jnt.pos.x;
+        joint["m_Pos"]["y"] = jnt.pos.y;
+        joint["m_Pos"]["z"] = jnt.pos.z;
+
+        joint["m_IsAnchor"] = jnt.is_anchor;
+        joint["m_IsSplit"] = jnt.is_split;
+
+        joint["m_Guid"] = jnt.guid;
+        b["m_BridgeJoints"].push_back(joint);
+    }
+    b["m_BridgeEdges"] = nlohmann::json::array();
+    for (const BridgeEdge& e : slot.bridge.edges) {
+        auto edge = nlohmann::json::object();
+        edge["m_MaterialType"] = e.material_type;
+        edge["m_NodeA_Guid"] = e.node_a_guid;
+        edge["m_NodeB_Guid"] = e.node_b_guid;
+        edge["m_JointAPart"] = e.joint_a_part;
+        edge["m_JointBPart"] = e.joint_b_part;
+
+        b["m_BridgeEdges"].push_back(edge);
+    }
+    b["m_BridgeSprings"] = nlohmann::json::array();
+    for (const BridgeSpring& s : slot.bridge.springs) {
+        auto spring = nlohmann::json::object();
+        spring["m_NormalizedValue"] = s.normalized_value;
+        spring["m_NodeA_Guid"] = s.node_a_guid;
+        spring["m_NodeB_Guid"] = s.node_b_guid;
+        spring["m_Guid"] = s.guid;
+
+        b["m_BridgeSprings"].push_back(spring);
+    }
+    b["m_Pistons"] = nlohmann::json::array();
+    for (const Piston& p : slot.bridge.pistons) {
+        auto piston = nlohmann::json::object();
+        piston["m_NormalizedValue"] = p.normalized_value;
+        piston["m_NodeA_Guid"] = p.node_a_guid;
+        piston["m_NodeB_Guid"] = p.node_b_guid;
+        piston["m_Guid"] = p.guid;
+
+        b["m_Pistons"].push_back(piston);
+    }
+    b["m_Anchors"] = nlohmann::json::array();
+    for (const BridgeJoint& a : slot.bridge.anchors) {
+        auto anchor = nlohmann::json::object();
+        anchor["m_Pos"]["x"] = a.pos.x;
+        anchor["m_Pos"]["y"] = a.pos.y;
+        anchor["m_Pos"]["z"] = a.pos.z;
+
+        anchor["m_IsAnchor"] = a.is_anchor;
+        anchor["m_IsSplit"] = a.is_split;
+
+        anchor["m_Guid"] = a.guid;
+        b["m_Anchors"].push_back(anchor);
+    }
+    b["m_HydraulicsController"]["m_Phases"] = nlohmann::json::array();
+    for (const HydraulicsControllerPhase& p : slot.bridge.phases) {
+        auto phase = nlohmann::json::object();
+        phase["m_HydraulicsPhaseGuid"] = p.hydraulics_phase_guid;
+        phase["m_PistonGuids"] = nlohmann::json::array();
+        for (const std::string& g : p.piston_guids) {
+            phase["m_PistonGuids"].push_back(g);
+        }
+        phase["m_BridgeSplitJoints"] = nlohmann::json::array();
+        for (const BridgeSplitJoint& jobj : p.bridge_split_joints) {
+            auto sj = nlohmann::json::object();
+            sj["m_BridgeJointGuid"] = jobj.guid;
+            sj["m_SplitJointState"] = jobj.state;
+        }
+        b["m_HydraulicsController"]["m_Phases"].push_back(phase);
+    }
+    j["m_Bridge"] = b;
+
+    j["m_UsingUnlimitedMaterials"] = slot.unlimitedMaterials;
+    j["m_UsingUnlimitedBudget"] = slot.unlimitedBudget;
+
+    std::ofstream of(path, std::ios::out);
+    of << j.dump(2);
+    of.close();
+}
+
 
 int main(int argc, char **argv) {
     const std::string help_msg = R"END(
@@ -2830,8 +3736,8 @@ int main(int argc, char **argv) {
         -o, --output <path>     Define the output path, otherwise will be <path>.json or <path>.layout.
         -t, --type <type>       The type of the output. Either JSON or YAML. Not yet implemented, defaults to JSON.
     Notes:
-        JSON files must have the JSON extension.
-        Output JSON is compatible with PolyConverter.
+        Files formats are based on the extension. If you feed the converter a file with the extension .layout that is
+        not a layout file, it will cause issues.
 
     )END";
 
@@ -2874,16 +3780,10 @@ int main(int argc, char **argv) {
         std::cout << "[\x1B[ Could not open file " << path << std::endl;
         return 1;
     }
-    char first_char = (char)ifs.get();
-    ifs.close();
-    if (first_char != '{' && path.substr(path.size() - 5) == ".json") {
-        Utils::log_error("Input file is not a valid JSON file!");
-        return 1;
-    }
 
-    auto start = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+    auto start = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch());
 
-    if (first_char == '{') {
+    if (path.ends_with(".layout.json")) {
         std::string json;
         std::ifstream fs(path);
         std::string line;
@@ -2898,36 +3798,46 @@ int main(int argc, char **argv) {
         if (custom_path) {
             path = output_path;
         } else {
-            if (path.substr(path.size() - 5) == ".json") {
-                path = path.substr(0, path.size() - 5);
-            }
             path += ".layout";
         }
 
         Serializer serializer(path, layout);
         serializer.serializeLayout();
         Utils::log_info("Layout serialized to " + path);
-    } else {
+    } else if (path.ends_with(".layout")) {
         Deserializer deserializer(path);
         Layout layout = deserializer.deserializeLayout();
 
         if (custom_path) {
             path = output_path;
         } else {
-            if (path.substr(path.size() - 7) == ".layout") {
-                path = path.substr(0, path.size() - 7);
-            }
             path += ".json";
         }
 
         dump_json(layout, path);
         Utils::log_info("Wrote JSON to " + path);
+    } else if (path.ends_with(".slot")) {
+        SlotDeserializer deserializer(path);
+        SaveSlot slot = deserializer.deserializeSlot();
+
+         if (custom_path) {
+            path = output_path;
+         } else {
+             path += ".json";
+         }
+
+        dump_slot_json(slot, path);
+        Utils::log_info("Wrote JSON to " + path);
+    } else if (path.ends_with(".slot.json")) {
+        U::log_info_d("Slot JSON files are not yet supported.");
+    } else {
+        U::log_error("File format not supported.");
+        return 1;
     }
 
     std::cout << "\n";
 
-    auto end = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
-    Utils::log_info_d("Done! (" + std::to_string((end - start).count()) + "ms)");
-
+    auto end = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch());
+    Utils::log_info_d("Done! (" + std::to_string((double)(end - start).count() / 1000000.0) + "ms)");
     return 0;
 }
