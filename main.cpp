@@ -1475,7 +1475,7 @@ private:
         settings.unbreakable = this->readBool();
         Utils::log_info_d("Unbreakable mode: %s", settings.unbreakable ? "\x1B[1;92menabled\x1B[0m" : "\x1B[1;91mdisabled\x1B[0m");
         settings.no_water = (version >= 28 && this->readBool());
-        Utils::log_info_d("Unbreakable mode: %s", settings.unbreakable ? "\x1B[1;92menabled\x1B[0m" : "\x1B[1;91mdisabled\x1B[0m");
+        Utils::log_info_d("No water: %s", settings.no_water ? "\x1B[1;92menabled\x1B[0m" : "\x1B[1;91mdisabled\x1B[0m");
         return settings;
     }
     CustomShape deserializeCustomShape(int version) {
