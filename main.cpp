@@ -10,7 +10,7 @@
 
 
 // Macros
-#define MAX_VERSION 26  // Maximum layout version fully supported
+#define MAX_VERSION 28  // Maximum layout version fully supported
 #define MAX_BRIDGE_VERSION 11  // Maximum bridge version fully supported
 #define MAX_SLOT_VERSION 3  // Maximum slot version fully supported
 #define MAX_PHYSICS_VERSION 1  // Maximum physics engine version fully supported
