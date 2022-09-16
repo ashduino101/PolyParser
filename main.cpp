@@ -290,6 +290,7 @@ struct TerrainIsland {
     int variant_index{};
     bool flipped{};
     bool lock_position{};
+    bool hidden{};
 };
 struct Ramp {
     Vec2 pos;
@@ -355,6 +356,7 @@ struct Budget {
 struct Settings {
     bool hydraulics_controller_enabled;
     bool unbreakable;
+    bool no_water;
 };
 struct CustomShape {
     Vec3 pos{};
@@ -758,7 +760,7 @@ public:
         layout.budget = this->deserializeBudget();
 
         // Then, the settings.
-        layout.settings = this->deserializeSettings();
+        layout.settings = this->deserializeSettings(layout.version);
 
         // Now, if the version is 9 or above, we have custom shapes to deal with.
         if (layout.version >= 9) {
@@ -1320,6 +1322,7 @@ private:
         island.terrain_island_type = (TerrainIslandType)this->readInt32();
         island.variant_index = this->readInt32();
         island.flipped = this->readBool();
+        island.hidden = (version >= 27 && this->readBool());
         if (version >= 6) {
             island.lock_position = this->readBool();
         }
@@ -1465,11 +1468,13 @@ private:
         b.allow_reinforced_road = this->readBool();
         return b;
     }
-    Settings deserializeSettings() {
+    Settings deserializeSettings(int version) {
         Settings settings{};
         settings.hydraulics_controller_enabled = this->readBool();
         Utils::log_info_d("Hydraulics controller: %s", settings.hydraulics_controller_enabled ? "\x1B[1;92menabled\x1B[0m" : "\x1B[1;91mdisabled\x1B[0m");
         settings.unbreakable = this->readBool();
+        Utils::log_info_d("Unbreakable mode: %s", settings.unbreakable ? "\x1B[1;92menabled\x1B[0m" : "\x1B[1;91mdisabled\x1B[0m");
+        settings.no_water = (version >= 28 && this->readBool());
         Utils::log_info_d("Unbreakable mode: %s", settings.unbreakable ? "\x1B[1;92menabled\x1B[0m" : "\x1B[1;91mdisabled\x1B[0m");
         return settings;
     }
@@ -1921,6 +1926,7 @@ private:
             this->writeInt32(stretch.variant_index); // Variant index
             this->writeBool(stretch.flipped); // Flipped
             this->writeBool(stretch.lock_position); // Lock position
+            this->writeBool(stretch.hidden);  // Hidden
         }
         U::log_info_s("Serialized %s terrain stretches", U::intc((int)this->layout.terrainStretches.size()).c_str());
 
@@ -2021,6 +2027,7 @@ private:
         // Settings
         this->writeBool(this->layout.settings.hydraulics_controller_enabled); // Hydraulics controller enabled
         this->writeBool(this->layout.settings.unbreakable); // Unbreakable
+        this->writeBool(this->layout.settings.no_water);  // No water
         U::log_info_s("Serialized settings");
 
         // Custom shapes
@@ -2949,6 +2956,7 @@ void dump_json(Layout &layout, const std::string& path) {
         stretch_json["m_VariantIndex"] = stretch.variant_index;
         stretch_json["m_Flipped"] = stretch.flipped;
         stretch_json["m_LockPosition"] = stretch.lock_position;
+        stretch_json["m_Hidden"] = stretch.hidden;
         stretch_json["m_UndoGuid"] = nullptr;
         j["m_TerrainStretches"].push_back(stretch_json);
     }
@@ -3150,6 +3158,7 @@ void dump_json(Layout &layout, const std::string& path) {
 
     j["m_Settings"]["m_HydraulicControllerEnabled"] = layout.settings.hydraulics_controller_enabled;
     j["m_Settings"]["m_Unbreakable"] = layout.settings.unbreakable;
+    j["m_Settings"]["m_NoWater"] = layout.settings.no_water;
 
     auto workshop = j["m_Workshop"];
     workshop["m_Id"] = layout.workshop.id;
@@ -3333,6 +3342,7 @@ Layout load_json(std::string &json_str) {
     auto settings = j["m_Settings"];
     layout.settings.hydraulics_controller_enabled = settings["m_HydraulicControllerEnabled"].get<bool>();
     layout.settings.unbreakable = settings["m_Unbreakable"].get<bool>();
+    layout.settings.no_water = settings["m_NoWater"].get<bool>();
 
     // Terrain stretches
     for (auto &ts : j["m_TerrainStretches"]) {
@@ -3347,6 +3357,7 @@ Layout load_json(std::string &json_str) {
         stretch.right_edge_water_height = ts["m_RightEdgeWaterHeight"].get<float>();
         stretch.terrain_island_type = (TerrainIslandType)ts["m_TerrainIslandType"].get<int>();
         stretch.variant_index = ts["m_VariantIndex"].get<int>();
+        stretch.hidden = ts["m_Hidden"].get<bool>();
         layout.terrainStretches.push_back(stretch);
     }
 
