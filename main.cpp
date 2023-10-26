@@ -29,7 +29,7 @@
 #include <getopt.h>
 
 // 3rd-party libraries
-#include "inc/json.hpp"
+#include <nlohmann/json.hpp>
 #include "inc/fifo_map.hpp"  // For ordered JSON
 
 // #include <yaml.h>  TODO - YAML support
@@ -810,6 +810,12 @@ public:
         return out;
     }
 private:
+    template<typename T>
+    T readAs() {
+        T value;
+        this->file.read(reinterpret_cast<char*>(&value), sizeof(value));
+        return value;
+    }
     char* readByte() {
         char* byte = new char[1];
         this->file.read(byte, 1);
@@ -871,7 +877,7 @@ private:
     }
     void getVersion(int &version, bool &isModded) {
         // The version is used for the order things are parsed in.
-        version = this->readInt32();
+        version = this->readAs<int>();
         isModded = false;
 
         if (version < 0) {
@@ -2077,9 +2083,9 @@ private:
             this->writeString(tag); // Tag
         }
         U::log_info_s(
-            layout.workshop.title.empty()
-            ? "Serialized workshop"
-            : "Serialized workshop level '%s'", ("\x1B[1;95m" + layout.workshop.title + "\x1B[0m").c_str()
+                layout.workshop.title.empty()
+                ? "Serialized workshop"
+                : "Serialized workshop level '%s'", ("\x1B[1;95m" + layout.workshop.title + "\x1B[0m").c_str()
         );
 
         // Support pillars
@@ -2730,14 +2736,14 @@ private:
     }
     long readLong() {
         uint64_t  value =
-            static_cast<uint64_t>(this->file.get()) |
-            static_cast<uint64_t>(this->file.get()) << 8 |
-            static_cast<uint64_t>(this->file.get()) << 16 |
-            static_cast<uint64_t>(this->file.get()) << 24 |
-            static_cast<uint64_t>(this->file.get()) << 32 |
-            static_cast<uint64_t>(this->file.get()) << 40 |
-            static_cast<uint64_t>(this->file.get()) << 48 |
-            static_cast<uint64_t>(this->file.get()) << 56;
+                static_cast<uint64_t>(this->file.get()) |
+                static_cast<uint64_t>(this->file.get()) << 8 |
+                static_cast<uint64_t>(this->file.get()) << 16 |
+                static_cast<uint64_t>(this->file.get()) << 24 |
+                static_cast<uint64_t>(this->file.get()) << 32 |
+                static_cast<uint64_t>(this->file.get()) << 40 |
+                static_cast<uint64_t>(this->file.get()) << 48 |
+                static_cast<uint64_t>(this->file.get()) << 56;
         return static_cast<long>(value);
     }
     void enterNode() {
@@ -3831,11 +3837,11 @@ int main(int argc, char **argv) {
         SlotDeserializer deserializer(path);
         SaveSlot slot = deserializer.deserializeSlot();
 
-         if (custom_path) {
+        if (custom_path) {
             path = output_path;
-         } else {
-             path += ".json";
-         }
+        } else {
+            path += ".json";
+        }
 
         dump_slot_json(slot, path);
         Utils::log_info("Wrote JSON to " + path);
